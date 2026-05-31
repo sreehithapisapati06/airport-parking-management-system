@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Smart Airport Parking Finder — Live Connected Backend</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap">
+<style>
+  :root{--primary:#0b63d6;--accent:#06a77d;--muted:#667085;--card:#ffffff;}
+  *{box-sizing:border-box}
+  body{font-family:"Poppins",sans-serif;margin:0;background:linear-gradient(180deg,#f4f7fb,#eef4ff);color:#0f1724}
+  header{background:linear-gradient(90deg,var(--primary),#0077ff);color:white;padding:18px}
+  header h1{margin:0;font-size:20px}
+  main{max-width:1150px;margin:18px auto;padding:14px}
+  .layout{display:grid;grid-template-columns:340px 1fr;gap:16px}
+  .card{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(11,99,214,0.06)}
+  .small{font-size:13px;color:var(--muted)}
+  select,input,button,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #e6e9ef;font-size:14px}
+  .btn{background:var(--primary);color:white;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:600}
+  .zones{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .zone-row{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:10px;border:1px solid #eef3ff}
+  .chip{padding:6px 8px;border-radius:999px;background:#f1f7ff;color:var(--primary);font-weight:600}
+  .live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:10px}
+  .slot-card{padding:10px;border-radius:10px;background:linear-gradient(180deg,#fff,#f8fbff);border:1px solid #e6eefc;cursor:pointer;text-align:center}
+  .slot-card.booked{background:linear-gradient(180deg,#fff6f6,#fff1f1);border:1px solid #fce7e7;color:#7f1d1d;cursor:not-allowed}
+  .modal-back{position:fixed;inset:0;background:rgba(2,6,23,0.45);display:flex;align-items:center;justify-content:center;z-index:80}
+  .modal{width:420px;background:white;border-radius:12px;padding:16px;box-shadow:0 20px 60px rgba(2,6,23,0.2)}
+  .toast{position:fixed;right:18px;bottom:18px;background:#111;color:white;padding:12px 14px;border-radius:10px;z-index:90}
+  footer{max-width:1150px;margin:12px auto;padding:10px 18px;color:var(--muted);font-size:13px}
+  @media (max-width:1000px){.layout{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Smart Airport Parking Finder (C Backend Connected)</h1>
+</header>
+
+<main>
+  <div class="layout">
+    <div>
+      <div class="card">
+        <label class="small">System Node connection</label>
+        <select id="airportSelect">
+            <option value="C_SERVER">Native C Socket Server Engine</option>
+        </select>
+        <div style="height:10px"></div>
+        <div style="display:flex;gap:10px;align-items:center;justify-content:space-between">
+          <div>
+            <div class="small">Currency</div>
+            <div id="currencyBox" class="chip">USD ($)</div>
+          </div>
+          <div style="min-width:120px">
+            <div class="small">Duration (hrs)</div>
+            <input type="number" id="hours" min="1" value="2" />
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <button class="btn" onclick="fetchLiveBackendData()">Force Refresh Sync</button>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div style="font-weight:700">Zone Summaries</div>
+        <div class="zones" id="zonesList">
+            <div class="zone-row">
+                <div><strong>Terminal Deck A</strong><div class="small" id="zoneMutedCount">Connecting...</div></div>
+            </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div style="font-weight:700">Client Reservations Log</div>
+        <div id="reservationsList" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:700" id="airportName">Server Active Cluster</div>
+            <div class="small" id="airportMeta">Address: Localhost Linux Socket Loopback</div>
+          </div>
+          <div class="small">Last Sync: <span id="lastUpdate">—</span></div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div style="font-weight:700">Live Active Board Array (Fetched from C Binary)</div>
+          <div id="liveGrid" class="live-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>Active hardware configuration link running over standard socket architecture.</footer>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+let serverSpots = [];
+
+function toast(msg, t=3000){ 
+  const el=document.createElement('div'); el.className='toast'; el.innerText=msg; 
+  document.getElementById('toastRoot').appendChild(el); 
+  setTimeout(()=>el.remove(),t); 
+}
+
+// Fetch slot data from our running C program dynamically via AJAX
+function fetchLiveBackendData() {
+  fetch('/api/spots')
+    .then(res => res.json())
+    .then(data => {
+      serverSpots = data;
+      renderLiveGrid();
+      document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+    })
+    .catch(err => {
+      console.error("Connection link down:", err);
+      toast("Error synchronizing tracking structures with C server.");
+    });
+}
+
+function renderLiveGrid(){
+  const grid = document.getElementById('liveGrid'); 
+  grid.innerHTML='';
+  
+  let occupiedCount = 0;
+  
+  serverSpots.forEach(s => {
+    const isOccupied = s.status === 'occupied';
+    if(isOccupied) occupiedCount++;
+    
+    const el = document.createElement('div'); 
+    el.className = 'slot-card ' + (isOccupied ? 'booked' : '');
+    el.innerHTML = `<div style="font-weight:700">${s.name}</div><div class="small">${s.status}</div>`;
+    
+    if(!isOccupied) {
+      el.onclick = () => openBookingModal(s);
+    }
+    grid.appendChild(el);
+  });
+
+  // Dynamically calculate metrics inside left status widget
+  document.getElementById('zoneMutedCount').innerText = `${serverSpots.length - occupiedCount} free • ${occupiedCount} occupied`;
+}
+
+function openBookingModal(spot){
+  const hours = parseInt(document.getElementById('hours').value || 1, 10);
+  const total = 5 * hours; 
+
+  const modalRoot = document.getElementById('modalRoot'); modalRoot.innerHTML = '';
+  const mb = document.createElement('div'); mb.className='modal-back';
+  mb.innerHTML = `
+    <div class="modal">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Reserve Slot ${spot.name}</strong><div class="small">Target Node: ${spot.id}</div></div>
+        <div><button onclick="closeModal()" style="background:none;border:none;font-weight:700;cursor:pointer">✕</button></div>
+      </div>
+      <div style="height:10px"></div>
+      <label class="small">Vehicle Identification Number</label>
+      <input id="vehicleNo" placeholder="ABC-1234" />
+      <div style="height:8px"></div>
+      <label class="small">Driver Registered Identity</label>
+      <input id="ownerName" placeholder="John Doe" />
+      <div style="height:8px"></div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label class="small">Hours</label>
+          <div style="padding:10px;border-radius:8px;border:1px solid #eef3ff;font-weight:700">${hours} hrs</div>
+        </div>
+        <div style="width:140px">
+          <label class="small">Calculated Price</label>
+          <div style="padding:10px;border-radius:8px;border:1px solid #eef3ff;font-weight:700">$${total.toFixed(2)}</div>
+        </div>
+      </div>
+      <hr style="margin:12px 0; border:0; border-top:1px solid #eee;" />
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" onclick="submitReservation('${spot.id}')">Submit Transaction to C Backend</button>
+        <button class="btn" style="background:#999" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>`;
+  modalRoot.appendChild(mb);
+}
+
+function submitReservation(spotId) {
+  const vehicleNo = document.getElementById('vehicleNo').value.trim();
+  const ownerName = document.getElementById('ownerName').value.trim();
+
+  if(!vehicleNo || !ownerName) {
+    return alert("Identity structures and validation fields must be full.");
+  }
+
+  // Format arguments into a URL safe format readable by basic C string scanning methods
+  const payload = `spotId=${spotId}&vehicleNo=${vehicleNo}&ownerName=${ownerName}`;
+
+  fetch('/api/reserve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: payload
+  })
+  .then(res => res.json())
+  .then(data => {
+    if(data.success) {
+      toast(data.message);
+      
+      // Update local storage history trace stack visualization
+      const log = document.getElementById('reservationsList');
+      const item = document.createElement('div');
+      item.className = 'card';
+      item.style.marginBottom = '6px';
+      item.style.background = '#f4fbf7';
+      item.innerHTML = `<div class="small"><strong>Spot Node Reserved:</strong> ${spotId}<br><b>Driver:</b> ${ownerName}</div>`;
+      log.insertBefore(item, log.firstChild);
+
+      closeModal();
+      fetchLiveBackendData(); // Force fetch data to update view matrix immediately
+    } else {
+      alert("Hardware feedback: " + data.message);
+    }
+  })
+  .catch(err => {
+    console.error("Communication failure:", err);
+    alert("Could not process transaction through connection array.");
+  });
+}
+
+function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+// Self booting routine configuration loops
+(function init(){
+  fetchLiveBackendData();
+  setInterval(fetchLiveBackendData, 4000); // System poller checks backend state every 4 seconds
+})();
+</script>
+</body>
+</html>
